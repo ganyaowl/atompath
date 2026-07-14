@@ -46,19 +46,10 @@ domain to that address. SQLite data is stored in the named Docker volume
 
 ```bash
 cd /opt/atompath
-docker build -t atompath:latest .
-docker volume create atompath-data
-docker rm -f atompath 2>/dev/null || true
-docker run -d \
-  --name atompath \
-  --restart unless-stopped \
-  --init \
-  -p 127.0.0.1:3001:3000 \
-  -v atompath-data:/app/data \
-  atompath:latest
+docker compose up -d --build
 
 curl -I http://127.0.0.1:3001
-docker inspect --format='{{.State.Health.Status}}' atompath
+docker compose ps
 ```
 
 To provision a company or regional account inside the running container:
@@ -92,15 +83,7 @@ existing Caddy service can receive public traffic on ports `80` and `443`.
 ```bash
 cd /opt/atompath
 git pull --ff-only
-docker build -t atompath:latest .
-docker rm -f atompath
-docker run -d \
-  --name atompath \
-  --restart unless-stopped \
-  --init \
-  -p 127.0.0.1:3001:3000 \
-  -v atompath-data:/app/data \
-  atompath:latest
+docker compose up -d --build
 ```
 
 The named volume survives container replacement. Before an important update, back
@@ -113,7 +96,7 @@ docker cp atompath:/app/data/database.db "./database.db.backup-$(date +%F-%H%M%S
 Useful checks:
 
 ```bash
-docker logs --tail=100 atompath
+docker compose logs --tail=100 app
 docker inspect --format='{{.State.Health.Status}}' atompath
 curl -I https://ganyaowl.uz
 ```

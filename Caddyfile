@@ -1,8 +1,9 @@
-# Install this as a site imported by the Caddy instance already using ports 80/443.
-# DNS for ganyaowl.uz must point to this server.
-ganyaowl.uz {
+# This file is mounted into the Caddy container by docker-compose.yml.
+# Change the site address if using another hostname. Its DNS A record must point
+# to this server; add AAAA only when public IPv6 works.
+atompath.ganyaowl.uz {
 	encode zstd gzip
-	reverse_proxy 127.0.0.1:3001
+	reverse_proxy app:3000
 
 	header {
 		-Server

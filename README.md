@@ -35,14 +35,35 @@ The easiest way to deploy your Next.js app is to use the [Vercel Platform](https
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
 
-## Fast Docker deployment with host Caddy
+## Docker deployment with automatic HTTPS
 
-This setup does not claim ports `80` or `443`. The application container listens on
-`127.0.0.1:3001`, and the Caddy instance already serving the host proxies the public
-domain to that address. SQLite data is stored in the named Docker volume
-`atompath-data`.
+Docker Compose runs both Atompath and Caddy. They share a private Compose network,
+so Caddy proxies to `app:3000`; no host Caddy installation or manual config copying
+is required. SQLite and Caddy certificates are stored in named Docker volumes.
 
-### 1. Build and start the application
+### 1. Prepare DNS and ports
+
+[`Caddyfile`](Caddyfile) currently serves `atompath.ganyaowl.uz`. At the DNS
+provider, create an `A` record named `atompath` pointing to the server's public
+IPv4 address. Create an `AAAA` record only if the server has working public IPv6.
+
+Check DNS before starting Caddy:
+
+```bash
+dig +short A atompath.ganyaowl.uz
+dig +short AAAA atompath.ganyaowl.uz
+```
+
+TCP ports `80` and `443` must be free and allowed by the firewall. UDP `443` is
+optional and enables HTTP/3. Stop any previous host or container reverse proxy
+that owns these ports:
+
+```bash
+sudo systemctl disable --now caddy 2>/dev/null || true
+sudo ss -ltnp | grep -E ':(80|443)\\s' || true
+```
+
+### 2. Build and start the stack
 
 ```bash
 cd /opt/atompath
@@ -50,7 +71,11 @@ docker compose up -d --build
 
 curl -I http://127.0.0.1:3001
 docker compose ps
+docker compose logs --tail=100 caddy
 ```
+
+Caddy obtains and renews the TLS certificate automatically. Its certificate data
+survives container replacement in the `atompath-caddy-data` volume.
 
 To provision a company or regional account inside the running container:
 
@@ -61,22 +86,12 @@ docker exec -it atompath node scripts/provision-user.mjs \
   --name "Organization name"
 ```
 
-### 2. Attach it to the existing Caddy service
-
-Point the `ganyaowl.uz` DNS `A`/`AAAA` record at the server and install the
-included site configuration:
+Verify the public route:
 
 ```bash
-sudo install -d -m 0755 /etc/caddy/sites
-sudo install -m 0644 Caddyfile /etc/caddy/sites/atompath.caddy
-sudo grep -qF 'import /etc/caddy/sites/*.caddy' /etc/caddy/Caddyfile \
-  || echo 'import /etc/caddy/sites/*.caddy' | sudo tee -a /etc/caddy/Caddyfile
-sudo caddy validate --config /etc/caddy/Caddyfile
-sudo systemctl reload caddy
+curl -I https://atompath.ganyaowl.uz
+docker compose logs --tail=100 caddy
 ```
-
-Caddy obtains and renews TLS certificates automatically once DNS resolves and the
-existing Caddy service can receive public traffic on ports `80` and `443`.
 
 ### 3. Fast update
 
@@ -96,7 +111,35 @@ docker cp atompath:/app/data/database.db "./database.db.backup-$(date +%F-%H%M%S
 Useful checks:
 
 ```bash
-docker compose logs --tail=100 app
+docker compose logs --tail=100 app caddy
 docker inspect --format='{{.State.Health.Status}}' atompath
-curl -I https://ganyaowl.uz
+curl -I https://atompath.ganyaowl.uz
 ```
+
+After editing `Caddyfile`, validate and reload it without replacing containers:
+
+```bash
+docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile
+docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
+```
+
+### Slow build troubleshooting
+
+The warning about `prebuild-install@7.1.3` comes from `sqlite3`; it does not stop
+the build. `sqlite3@6.0.1` is already the newest release and still declares that
+deprecated installer, so an override is not a safe fix.
+
+If a tiny `sha256:...` layer from `node:24-trixie-slim` takes several minutes,
+the delay is between Docker and Docker Hub (or its CDN), not npm and not the size
+of the layer. Pull the base image separately to make the failing operation clear:
+
+```bash
+docker pull node:24-trixie-slim
+docker compose build --progress=plain app
+```
+
+After one successful pull, omit `--pull` during normal deployments so Docker can
+reuse the cached base image. Use `--pull` only when intentionally checking for a
+new base image. If the separate pull still stalls, fix the server's DNS, proxy,
+firewall, or Docker Hub connectivity; changing the npm dependency cannot affect
+that download.

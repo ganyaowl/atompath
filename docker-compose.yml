@@ -19,6 +19,26 @@ services:
     volumes:
       - atompath-data:/app/data
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: atompath-caddy
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - atompath-caddy-data:/data
+      - atompath-caddy-config:/config
+
 volumes:
   atompath-data:
     name: atompath-data
+  atompath-caddy-data:
+    name: atompath-caddy-data
+  atompath-caddy-config:
+    name: atompath-caddy-config

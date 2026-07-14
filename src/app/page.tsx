@@ -110,9 +110,8 @@ export default function LandingPage() {
 
                 <a href="#forecast">
                   <Button
-                    variant="secondary"
+                    variant="outline"
                     size="lg"
-                    className="border-white/20 text-white hover:bg-white/10"
                   >
                     Посмотреть прогноз вакансий
                   </Button>

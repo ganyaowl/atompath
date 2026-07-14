@@ -39,7 +39,10 @@ export function Header({ variant = 'landing' }: HeaderProps) {
               </nav>
 
               {/* Desktop CTA */}
-              <div className="hidden md:flex items-center">
+              <div className="hidden md:flex items-center gap-4">
+                <Link href="/login" className="text-sm font-medium text-[#1F2933]/70 hover:text-[#0B2A4A] transition-colors">
+                  Войти
+                </Link>
                 <Link href="/dashboard">
                   <Button variant="primary" size="sm">
                     Пройти оценку
@@ -83,8 +86,11 @@ export function Header({ variant = 'landing' }: HeaderProps) {
                 {link.label}
               </a>
             ))}
-            <div className="px-3 pt-2">
-              <Link href="/dashboard">
+            <div className="px-3 pt-2 space-y-2">
+              <Link href="/login" className="block text-center text-sm font-medium text-[#1F2933]/70 py-2 hover:bg-[#F4F7FA] rounded-lg" onClick={() => setMobileMenuOpen(false)}>
+                Войти
+              </Link>
+              <Link href="/dashboard" onClick={() => setMobileMenuOpen(false)}>
                 <Button variant="primary" size="sm" className="w-full">
                   Пройти оценку
                 </Button>

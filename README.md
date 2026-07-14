@@ -131,13 +131,14 @@ on a GitHub-hosted runner, pushes it to GHCR, and deploys it over SSH. The produ
 server only pulls the finished image, so it does not need enough RAM to run
 `next build`.
 
-Add these repository secrets under **Settings → Secrets and variables → Actions**:
+Add this repository secret under **Settings → Secrets and variables → Actions**:
 
-- `ORACLE_HOST`: the server IP or SSH hostname.
-- `ORACLE_USER`: `ubuntu`.
 - `ORACLE_SSH_KEY`: the complete private key from
   `~/.ssh/github_actions_oracle`, including its BEGIN/END lines. Never commit this
   value to the repository.
+
+The public SSH endpoint (`ubuntu@atompath.ganyaowl.uz`) is declared directly in
+the workflow; a host or username secret is not required.
 
 The matching public key must be present in the server's `authorized_keys`:
 

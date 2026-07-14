@@ -1,16 +1,10 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
 import './globals.css';
 
-const inter = Inter({
-  subsets: ['latin'],
-  variable: '--font-inter',
-});
-
 export const metadata: Metadata = {
-  title: 'AtomPath — Sustainable Employment for Nuclear Regions',
+  title: 'AtomPath — карьерные маршруты для атомных регионов',
   description:
-    'AtomPath predicts future workforce demand, evaluates your skills, and creates a personalized pathway from construction work to long-term employment.',
+    'Оценка навыков, обучение и карьерные маршруты для устойчивой занятости в атомных регионах.',
 };
 
 export default function RootLayout({
@@ -19,7 +13,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`h-full ${inter.variable}`}>
+    <html lang="ru" className="h-full">
       <body className="min-h-full flex flex-col antialiased font-sans">{children}</body>
     </html>
   );

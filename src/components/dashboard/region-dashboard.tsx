@@ -5,23 +5,28 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { logout } from '@/app/actions';
 import { 
-  Users, 
   Map, 
   MapPin, 
   TrendingUp, 
   Award, 
   CheckCircle, 
-  LogOut, 
-  BarChart2, 
-  ShieldCheck 
+  LogOut
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 
 interface RegionDashboardProps {
-  user: any;
-  regionStats: any[];
-  professionsList: any[];
-  internshipsList: any[];
+  user: { name: string };
+  regionStats: RegionStat[];
+  professionsList: unknown[];
+  internshipsList: unknown[];
+}
+
+interface RegionStat {
+  id: number;
+  district: string;
+  skill_gap: string;
+  trained: number;
+  employed: number;
 }
 
 export function RegionDashboard({

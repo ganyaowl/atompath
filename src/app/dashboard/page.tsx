@@ -5,9 +5,9 @@ import { Footer } from '@/components/shared/footer';
 import { ResidentDashboard } from '@/components/dashboard/resident-dashboard';
 import { CompanyDashboard } from '@/components/dashboard/company-dashboard';
 import { RegionDashboard } from '@/components/dashboard/region-dashboard';
+import { getResidentDashboard } from '@/lib/resident-data';
 import { 
   getCurrentUser, 
-  getCoursesList, 
   getInternshipsList, 
   getProfessions,
   getCompanyApplicants,
@@ -24,9 +24,8 @@ export default async function DashboardPage() {
     redirect('/login');
   }
 
-  // Fetch all necessary data based on the role
-  const professionsList = await getProfessions();
-  const internshipsList = await getInternshipsList();
+  const professionsList = user.role === 'resident' ? [] : await getProfessions();
+  const internshipsList = user.role === 'resident' ? [] : await getInternshipsList();
 
   return (
     <div className="min-h-screen flex flex-col bg-[#F4F7FA]">
@@ -36,12 +35,7 @@ export default async function DashboardPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           
           {user.role === 'resident' && (
-            <ResidentDashboard 
-              user={user} 
-              courses={await getCoursesList()} 
-              internships={internshipsList}
-              professionsList={professionsList}
-            />
+            <ResidentDashboard data={await getResidentDashboard(user)} />
           )}
 
           {user.role === 'company' && (

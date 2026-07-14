@@ -17,20 +17,51 @@ import {
   Briefcase, 
   TrendingUp, 
   Building, 
-  MapPin, 
   Check, 
   X, 
-  LogOut, 
-  ShieldCheck 
+  LogOut
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
 interface CompanyDashboardProps {
-  user: any;
-  professionsList: any[];
-  internshipsList: any[];
-  applicantsList: any[];
-  demandsList: any[];
+  user: { name: string };
+  professionsList: ProfessionRow[];
+  internshipsList: InternshipRow[];
+  applicantsList: ApplicantRow[];
+  demandsList: DemandRow[];
+}
+
+interface ProfessionRow {
+  id?: number;
+  title: string;
+  requirements: string;
+  salary_growth: string;
+  transition_time: string;
+}
+
+interface InternshipRow {
+  id?: number;
+  title: string;
+  company: string;
+  location: string;
+  match_pct: number;
+}
+
+interface ApplicantRow {
+  applicationId: number;
+  applicationStatus: string;
+  residentName: string;
+  residentEmail: string;
+  residentSkills: string;
+  internshipTitle: string;
+}
+
+interface DemandRow {
+  year: string;
+  automation: number;
+  safety: number;
+  digital: number;
+  nuclear: number;
 }
 
 export function CompanyDashboard({

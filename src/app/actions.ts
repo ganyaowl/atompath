@@ -1,314 +1,323 @@
 'use server';
 
-import { getDb } from '@/lib/db';
-import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
+import { refresh } from 'next/cache';
+import { createSession, destroySession, getSession, requireRole } from '@/lib/auth';
+import { getDb } from '@/lib/db';
+import { hashPassword, verifyPassword } from '@/lib/password';
+import { getSkills } from '@/lib/resident-data';
+import type { ActionResult } from '@/lib/types';
+import {
+  assessmentSchema,
+  fieldErrors,
+  formDataObject,
+  loginSchema,
+  profileSchema,
+  registrationSchema,
+} from '@/lib/validation';
 
-export async function getSessionUserId() {
-  const cookieStore = await cookies();
-  const userIdStr = cookieStore.get('userId')?.value;
-  return userIdStr ? parseInt(userIdStr, 10) : null;
+function failure(error: string, fields?: Record<string, string[]>): ActionResult<never> {
+  return { success: false, error, fieldErrors: fields };
 }
 
-export async function login(formData: FormData) {
-  const email = formData.get('email') as string;
-  const password = formData.get('password') as string;
-  const role = formData.get('role') as string;
-
-  if (!email || !password || !role) {
-    return { error: 'Заполните все поля' };
-  }
+export async function login(formData: FormData): Promise<ActionResult<never>> {
+  const parsed = loginSchema.safeParse(formDataObject(formData));
+  if (!parsed.success) return failure('Проверьте введенные данные', fieldErrors(parsed.error));
 
   const db = await getDb();
-  const user = await db.get(
-    'SELECT * FROM users WHERE email = ? AND role = ?',
-    [email, role]
+  const user = await db.get<{ id: number; password_hash: string | null }>(
+    'SELECT id, password_hash FROM users WHERE email = ? COLLATE NOCASE AND role = ?',
+    [parsed.data.email, parsed.data.role],
   );
-
-  if (!user || user.password !== password) {
-    return { error: 'Неверный email, пароль или роль' };
+  if (!user?.password_hash || !(await verifyPassword(parsed.data.password, user.password_hash))) {
+    return failure('Неверный email, пароль или роль');
   }
 
-  const cookieStore = await cookies();
-  cookieStore.set('userId', user.id.toString(), {
-    path: '/',
-    httpOnly: true,
-    maxAge: 60 * 60 * 24 * 7, // 1 week
-  });
-
+  await createSession(user.id);
   redirect('/dashboard');
 }
 
-export async function register(formData: FormData) {
-  const email = formData.get('email') as string;
-  const password = formData.get('password') as string;
-  const role = formData.get('role') as string;
-  const name = formData.get('name') as string;
-  
-  // Resident fields
-  const currentPosition = formData.get('currentPosition') as string || '';
-  const experience = formData.get('experience') as string || '';
-  const region = formData.get('region') as string || '';
-  const skills = formData.get('skills') as string || '';
-
-  if (!email || !password || !role || !name) {
-    return { error: 'Заполните основные поля' };
-  }
+export async function registerResident(formData: FormData): Promise<ActionResult<never>> {
+  const values = formDataObject(formData);
+  const parsed = registrationSchema.safeParse({
+    ...values,
+    currentPosition: values.currentPosition ?? '',
+    experience: values.experience ?? '',
+    region: values.region ?? '',
+  });
+  if (!parsed.success) return failure('Проверьте введенные данные', fieldErrors(parsed.error));
+  if (values.role && values.role !== 'resident') return failure('Публичная регистрация доступна только жителям');
 
   const db = await getDb();
-  
   try {
     const result = await db.run(
-      `INSERT INTO users (email, password, role, name, current_position, experience, region, skills) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [email, password, role, name, currentPosition, experience, region, skills]
+      `INSERT INTO users (email, password_hash, role, name, current_position, experience, region, skills)
+       VALUES (?, ?, 'resident', ?, ?, ?, ?, '')`,
+      [
+        parsed.data.email.toLowerCase(),
+        await hashPassword(parsed.data.password),
+        parsed.data.name,
+        parsed.data.currentPosition,
+        parsed.data.experience,
+        parsed.data.region,
+      ],
     );
-
-    const cookieStore = await cookies();
-    if (result.lastID) {
-      cookieStore.set('userId', result.lastID.toString(), {
-        path: '/',
-        httpOnly: true,
-        maxAge: 60 * 60 * 24 * 7,
-      });
+    await createSession(result.lastID!);
+  } catch (error: unknown) {
+    if (error instanceof Error && error.message.includes('UNIQUE constraint failed')) {
+      return failure('Пользователь с таким email уже существует');
     }
-  } catch (err: any) {
-    if (err.message && err.message.includes('UNIQUE constraint failed')) {
-      return { error: 'Пользователь с таким email уже существует' };
-    }
-    return { error: 'Ошибка регистрации: ' + err.message };
+    return failure('Не удалось создать учетную запись');
   }
-
   redirect('/dashboard');
 }
 
-export async function logout() {
-  const cookieStore = await cookies();
-  cookieStore.delete('userId');
+export const register = registerResident;
+
+export async function logout(): Promise<never> {
+  await destroySession();
   redirect('/');
 }
 
 export async function getCurrentUser() {
-  const userId = await getSessionUserId();
-  if (!userId) return null;
-
-  const db = await getDb();
-  const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
-  return user || null;
+  return getSession();
 }
 
-export async function updateProfile(formData: FormData) {
-  const userId = await getSessionUserId();
-  if (!userId) return { error: 'Не авторизован' };
-
-  const name = formData.get('name') as string;
-  const currentPosition = formData.get('currentPosition') as string;
-  const experience = formData.get('experience') as string;
-  const region = formData.get('region') as string;
-  const skills = formData.get('skills') as string;
+export async function updateProfile(formData: FormData): Promise<ActionResult<undefined>> {
+  const user = await requireRole('resident');
+  const parsed = profileSchema.safeParse(formDataObject(formData));
+  if (!parsed.success) return failure('Проверьте профиль', fieldErrors(parsed.error));
 
   const db = await getDb();
   await db.run(
-    `UPDATE users SET name = ?, current_position = ?, experience = ?, region = ?, skills = ? WHERE id = ?`,
-    [name, currentPosition, experience, region, skills, userId]
+    'UPDATE users SET name = ?, current_position = ?, experience = ?, region = ? WHERE id = ?',
+    [parsed.data.name, parsed.data.currentPosition, parsed.data.experience, parsed.data.region, user.id],
   );
-
-  return { success: true };
+  refresh();
+  return { success: true, data: undefined };
 }
 
-export async function enrollCourse(courseId: number) {
-  const userId = await getSessionUserId();
-  if (!userId) return { error: 'Не авторизован' };
+function parseAssessment(formData: FormData) {
+  const values = formDataObject(formData);
+  const responses = Array.from(formData.entries())
+    .filter(([key]) => key.startsWith('skill_'))
+    .map(([key, value]) => ({ skillId: Number(key.slice(6)), level: Number(value) }));
+  return assessmentSchema.safeParse({ ...values, responses });
+}
+
+async function persistAssessment(formData: FormData, status: 'draft' | 'completed'): Promise<ActionResult<{ assessmentId: number }>> {
+  const user = await requireRole('resident');
+  const parsed = parseAssessment(formData);
+  if (!parsed.success) return failure('Заполните профиль и оценки навыков', fieldErrors(parsed.error));
+
+  const activeSkills = await getSkills();
+  const submittedIds = new Set(parsed.data.responses.map((item) => item.skillId));
+  if (status === 'completed' && activeSkills.some((skill) => !submittedIds.has(skill.id))) {
+    return failure('Оцените каждый навык перед завершением');
+  }
 
   const db = await getDb();
-  
-  // Check if already enrolled
-  const existing = await db.get(
-    'SELECT * FROM user_courses WHERE user_id = ? AND course_id = ?',
-    [userId, courseId]
-  );
+  await db.exec('BEGIN IMMEDIATE');
+  try {
+    const existing = await db.get<{ id: number }>(
+      "SELECT id FROM assessments WHERE user_id = ? AND status = 'draft' ORDER BY id DESC LIMIT 1",
+      user.id,
+    );
+    let assessmentId = existing?.id;
+    if (assessmentId) {
+      await db.run(
+        `UPDATE assessments SET status = ?, current_position = ?, experience = ?, region = ?, certifications = ?,
+         completed_at = CASE WHEN ? = 'completed' THEN CURRENT_TIMESTAMP ELSE NULL END, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND user_id = ?`,
+        [status, parsed.data.currentPosition, parsed.data.experience, parsed.data.region, parsed.data.certifications, status, assessmentId, user.id],
+      );
+    } else {
+      const result = await db.run(
+        `INSERT INTO assessments (user_id, status, current_position, experience, region, certifications, completed_at)
+         VALUES (?, ?, ?, ?, ?, ?, CASE WHEN ? = 'completed' THEN CURRENT_TIMESTAMP ELSE NULL END)`,
+        [user.id, status, parsed.data.currentPosition, parsed.data.experience, parsed.data.region, parsed.data.certifications, status],
+      );
+      assessmentId = result.lastID!;
+    }
 
-  if (existing) {
-    // Increment progress by 10% or complete it
-    const newProgress = Math.min((existing.progress || 0) + 15, 100);
+    for (const response of parsed.data.responses) {
+      await db.run(
+        `INSERT INTO assessment_responses (assessment_id, skill_id, level) VALUES (?, ?, ?)
+         ON CONFLICT(assessment_id, skill_id) DO UPDATE SET level = excluded.level`,
+        [assessmentId, response.skillId, response.level],
+      );
+    }
     await db.run(
-      'UPDATE user_courses SET progress = ? WHERE user_id = ? AND course_id = ?',
-      [newProgress, userId, courseId]
+      'UPDATE users SET current_position = ?, experience = ?, region = ? WHERE id = ?',
+      [parsed.data.currentPosition, parsed.data.experience, parsed.data.region, user.id],
     );
-  } else {
-    // Start course with 15% progress
-    await db.run(
-      'INSERT INTO user_courses (user_id, course_id, progress) VALUES (?, ?, ?)',
-      [userId, courseId, 15]
-    );
+    if (status === 'completed') await db.run('DELETE FROM user_pathways WHERE user_id = ?', user.id);
+    await db.exec('COMMIT');
+    return { success: true, data: { assessmentId } };
+  } catch (error) {
+    await db.exec('ROLLBACK');
+    if (error instanceof Error && error.message.includes('FOREIGN KEY')) return failure('Обнаружен неизвестный навык');
+    return failure('Не удалось сохранить оценку');
   }
-
-  return { success: true };
 }
 
-export async function applyInternship(internshipId: number) {
-  const userId = await getSessionUserId();
-  if (!userId) return { error: 'Не авторизован' };
+export async function saveAssessmentDraft(formData: FormData) {
+  return persistAssessment(formData, 'draft');
+}
 
+export async function submitAssessment(formData: FormData) {
+  const result = await persistAssessment(formData, 'completed');
+  if (result.success) redirect('/dashboard');
+  return result;
+}
+
+export async function selectPathway(professionId: number): Promise<ActionResult<undefined>> {
+  const user = await requireRole('resident');
+  if (!Number.isInteger(professionId) || professionId <= 0) return failure('Некорректная профессия');
   const db = await getDb();
-  
-  // Check if already applied
-  const existing = await db.get(
-    'SELECT * FROM applications WHERE user_id = ? AND internship_id = ?',
-    [userId, internshipId]
+  const allowed = await db.get(
+    `SELECT 1 FROM profession_skills ps
+     WHERE ps.profession_id = ? AND EXISTS (
+       SELECT 1 FROM assessments WHERE user_id = ? AND status = 'completed'
+     )`,
+    [professionId, user.id],
   );
-
-  if (!existing) {
-    await db.run(
-      'INSERT INTO applications (user_id, internship_id, status) VALUES (?, ?, ?)',
-      [userId, internshipId, 'Заявка подана']
-    );
-  }
-
-  return { success: true };
+  if (!allowed) return failure('Профессия недоступна для выбора');
+  await db.run(
+    `INSERT INTO user_pathways (user_id, profession_id) VALUES (?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET profession_id = excluded.profession_id, selected_at = CURRENT_TIMESTAMP`,
+    [user.id, professionId],
+  );
+  refresh();
+  return { success: true, data: undefined };
 }
 
-export async function addProfession(formData: FormData) {
-  const userId = await getSessionUserId();
-  if (!userId) return { error: 'Не авторизован' };
+export async function enrollCourse(courseId: number): Promise<ActionResult<undefined>> {
+  const user = await requireRole('resident');
+  if (!Number.isInteger(courseId) || courseId <= 0) return failure('Некорректный курс');
+  const db = await getDb();
+  const course = await db.get('SELECT 1 FROM courses WHERE id = ?', courseId);
+  if (!course) return failure('Курс не найден');
+  await db.run('INSERT OR IGNORE INTO user_courses (user_id, course_id, progress) VALUES (?, ?, 0)', [user.id, courseId]);
+  refresh();
+  return { success: true, data: undefined };
+}
 
-  const title = formData.get('title') as string;
-  const requirements = formData.get('requirements') as string;
-  const salaryGrowth = formData.get('salaryGrowth') as string;
-  const transitionTime = formData.get('transitionTime') as string;
+export async function updateCourseProgress(courseId: number, progress: number): Promise<ActionResult<undefined>> {
+  const user = await requireRole('resident');
+  if (!Number.isInteger(progress) || progress < 0 || progress > 100) return failure('Прогресс должен быть от 0 до 100');
+  const db = await getDb();
+  const current = await db.get<{ progress: number }>('SELECT progress FROM user_courses WHERE user_id = ? AND course_id = ?', [user.id, courseId]);
+  if (!current) return failure('Сначала запишитесь на курс');
+  if (progress < current.progress) return failure('Прогресс нельзя уменьшить');
+  await db.run('UPDATE user_courses SET progress = ? WHERE user_id = ? AND course_id = ?', [progress, user.id, courseId]);
+  refresh();
+  return { success: true, data: undefined };
+}
 
-  if (!title || !requirements) {
-    return { error: 'Заполните название и требования' };
-  }
+export async function applyInternship(internshipId: number): Promise<ActionResult<undefined>> {
+  const user = await requireRole('resident');
+  if (!Number.isInteger(internshipId) || internshipId <= 0) return failure('Некорректная стажировка');
+  const db = await getDb();
+  const internship = await db.get('SELECT 1 FROM internships WHERE id = ?', internshipId);
+  if (!internship) return failure('Стажировка не найдена');
+  await db.run(
+    "INSERT OR IGNORE INTO applications (user_id, internship_id, status) VALUES (?, ?, 'Заявка подана')",
+    [user.id, internshipId],
+  );
+  refresh();
+  return { success: true, data: undefined };
+}
 
+export async function addProfession(formData: FormData): Promise<ActionResult<undefined>> {
+  await requireRole('company');
+  const title = String(formData.get('title') ?? '').trim();
+  const requirements = String(formData.get('requirements') ?? '').trim();
+  if (!title || !requirements) return failure('Заполните название и требования');
   const db = await getDb();
   await db.run(
     'INSERT INTO professions (title, requirements, salary_growth, transition_time) VALUES (?, ?, ?, ?)',
-    [title, requirements, salaryGrowth || '+25%', transitionTime || '6 месяцев']
+    [title, requirements, String(formData.get('salaryGrowth') || '+25%'), String(formData.get('transitionTime') || '6 месяцев')],
   );
-
-  return { success: true };
+  return { success: true, data: undefined };
 }
 
-export async function addInternship(formData: FormData) {
-  const userId = await getSessionUserId();
-  if (!userId) return { error: 'Не авторизован' };
-
-  const title = formData.get('title') as string;
-  const company = formData.get('company') as string;
-  const location = formData.get('location') as string;
-  const matchPct = parseInt(formData.get('matchPct') as string || '80', 10);
-
-  if (!title || !company || !location) {
-    return { error: 'Заполните название, компанию и место' };
-  }
-
+export async function addInternship(formData: FormData): Promise<ActionResult<undefined>> {
+  const user = await requireRole('company');
+  const title = String(formData.get('title') ?? '').trim();
+  const location = String(formData.get('location') ?? '').trim();
+  if (!title || !location) return failure('Заполните название и место');
   const db = await getDb();
   await db.run(
-    'INSERT INTO internships (title, company, location, match_pct, company_id) VALUES (?, ?, ?, ?, ?)',
-    [title, company, location, matchPct, userId]
+    'INSERT INTO internships (title, company, location, match_pct, company_id) VALUES (?, ?, ?, 0, ?)',
+    [title, user.name, location, user.id],
   );
-
-  return { success: true };
+  return { success: true, data: undefined };
 }
 
-export async function updateDemand(formData: FormData) {
-  const userId = await getSessionUserId();
-  if (!userId) return { error: 'Не авторизован' };
-
-  const year = formData.get('year') as string;
-  const automation = parseInt(formData.get('automation') as string || '0', 10);
-  const safety = parseInt(formData.get('safety') as string || '0', 10);
-  const digital = parseInt(formData.get('digital') as string || '0', 10);
-  const nuclear = parseInt(formData.get('nuclear') as string || '0', 10);
-
-  if (!year) {
-    return { error: 'Заполните год' };
-  }
-
+export async function updateDemand(formData: FormData): Promise<ActionResult<undefined>> {
+  await requireRole('company');
+  const year = String(formData.get('year') ?? '').trim();
+  if (!/^\d{4}$/.test(year)) return failure('Введите год в формате ГГГГ');
+  const values = ['automation', 'safety', 'digital', 'nuclear'].map((key) => Number(formData.get(key) ?? 0));
+  if (values.some((value) => !Number.isInteger(value) || value < 0)) return failure('Значения спроса должны быть неотрицательными числами');
   const db = await getDb();
   await db.run(
     `INSERT INTO demands (year, automation, safety, digital, nuclear) VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(year) DO UPDATE SET 
-     automation = excluded.automation,
-     safety = excluded.safety,
-     digital = excluded.digital,
-     nuclear = excluded.nuclear`,
-    [year, automation, safety, digital, nuclear]
+     ON CONFLICT(year) DO UPDATE SET automation=excluded.automation, safety=excluded.safety,
+     digital=excluded.digital, nuclear=excluded.nuclear`,
+    [year, ...values],
   );
-
-  return { success: true };
+  return { success: true, data: undefined };
 }
 
 export async function getProfessions() {
-  const db = await getDb();
-  return await db.all('SELECT * FROM professions');
+  return (await getDb()).all('SELECT * FROM professions ORDER BY title');
 }
 
 export async function getCoursesList() {
-  const userId = await getSessionUserId();
+  const user = await getSession();
   const db = await getDb();
-  
-  if (!userId) {
-    const list = await db.all('SELECT * FROM courses');
-    return list.map(c => ({ ...c, progress: 0 }));
-  }
-
-  const list = await db.all(`
-    SELECT c.*, IFNULL(uc.progress, 0) as progress 
-    FROM courses c
-    LEFT JOIN user_courses uc ON uc.course_id = c.id AND uc.user_id = ?
-  `, [userId]);
-
-  return list;
+  return db.all(`SELECT c.*, IFNULL(uc.progress, 0) progress FROM courses c
+    LEFT JOIN user_courses uc ON uc.course_id = c.id AND uc.user_id = ?`, user?.id ?? -1);
 }
 
 export async function getInternshipsList() {
-  const userId = await getSessionUserId();
+  const user = await getSession();
   const db = await getDb();
-
-  if (!userId) {
-    const list = await db.all('SELECT * FROM internships');
-    return list.map(i => ({ ...i, applied: false, appStatus: '' }));
-  }
-
-  const list = await db.all(`
-    SELECT i.*, 
-           CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END as applied,
-           IFNULL(a.status, '') as appStatus
-    FROM internships i
-    LEFT JOIN applications a ON a.internship_id = i.id AND a.user_id = ?
-  `, [userId]);
-
-  return list;
+  return db.all(`SELECT i.*, CASE WHEN a.id IS NULL THEN 0 ELSE 1 END applied,
+    IFNULL(a.status, '') appStatus FROM internships i
+    LEFT JOIN applications a ON a.internship_id = i.id AND a.user_id = ?`, user?.id ?? -1);
 }
 
 export async function getDemands() {
-  const db = await getDb();
-  return await db.all('SELECT * FROM demands ORDER BY year ASC');
+  return (await getDb()).all('SELECT * FROM demands ORDER BY year');
 }
 
 export async function getRegionStats() {
-  const db = await getDb();
-  return await db.all('SELECT * FROM region_stats');
+  return (await getDb()).all('SELECT * FROM region_stats ORDER BY district');
 }
 
 export async function getCompanyApplicants() {
-  const db = await getDb();
-  return await db.all(`
-    SELECT a.id as applicationId, a.status as applicationStatus,
-           u.name as residentName, u.email as residentEmail, 
-           u.current_position as residentPos, u.experience as residentExp,
-           u.skills as residentSkills, i.title as internshipTitle
-    FROM applications a
-    JOIN users u ON u.id = a.user_id
+  const user = await requireRole('company');
+  return (await getDb()).all(`
+    SELECT a.id applicationId, a.status applicationStatus, u.name residentName,
+           u.email residentEmail, u.current_position residentPos, u.experience residentExp,
+           u.skills residentSkills, i.title internshipTitle
+    FROM applications a JOIN users u ON u.id = a.user_id
     JOIN internships i ON i.id = a.internship_id
-  `);
+    WHERE i.company_id = ? ORDER BY a.created_at DESC
+  `, user.id);
 }
 
-export async function handleApplicationAction(appId: number, action: 'Одобрить' | 'Отклонить') {
-  const db = await getDb();
+export async function handleApplicationAction(appId: number, action: 'Одобрить' | 'Отклонить'): Promise<ActionResult<undefined>> {
+  const user = await requireRole('company');
   const status = action === 'Одобрить' ? 'Одобрено' : 'Отклонено';
-  await db.run('UPDATE applications SET status = ? WHERE id = ?', [status, appId]);
-  return { success: true };
+  const result = await (await getDb()).run(
+    `UPDATE applications SET status = ? WHERE id = ? AND internship_id IN
+     (SELECT id FROM internships WHERE company_id = ?)`,
+    [status, appId, user.id],
+  );
+  if (!result.changes) return failure('Заявка не найдена или недоступна');
+  return { success: true, data: undefined };
 }

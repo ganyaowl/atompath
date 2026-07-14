@@ -24,11 +24,11 @@ export default function LoginPage() {
 
     try {
       const res = await login(formData);
-      if (res && res.error) {
+      if (!res.success) {
         setError(res.error);
         setLoading(false);
       }
-    } catch (err: any) {
+    } catch {
       setError('Произошла непредвиденная ошибка');
       setLoading(false);
     }

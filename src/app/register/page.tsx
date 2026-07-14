@@ -12,7 +12,6 @@ import { ArrowRight, UserPlus, ShieldAlert } from 'lucide-react';
 import { experienceOptions } from '@/lib/data';
 
 export default function RegisterPage() {
-  const [role, setRole] = useState<'resident' | 'company' | 'region'>('resident');
   const [experience, setExperience] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -23,18 +22,16 @@ export default function RegisterPage() {
     setLoading(true);
 
     const formData = new FormData(e.currentTarget);
-    formData.append('role', role);
-    if (role === 'resident') {
-      formData.append('experience', experience);
-    }
+    formData.append('role', 'resident');
+    formData.append('experience', experience);
 
     try {
       const res = await register(formData);
-      if (res && res.error) {
+      if (!res.success) {
         setError(res.error);
         setLoading(false);
       }
-    } catch (err: any) {
+    } catch {
       setError('Произошла непредвиденная ошибка');
       setLoading(false);
     }
@@ -53,35 +50,11 @@ export default function RegisterPage() {
                 Регистрация
               </CardTitle>
               <p className="text-sm text-[#1F2933]/60 mt-1">
-                Создайте аккаунт на платформе AtomPath
+                Создайте аккаунт жителя на платформе AtomPath
               </p>
             </CardHeader>
 
             <CardContent>
-              {/* Role Select Tabs */}
-              <div className="grid grid-cols-3 gap-2 bg-[#0B2A4A]/5 p-1 rounded-xl mb-6">
-                {(
-                  [
-                    { id: 'resident', label: 'Житель' },
-                    { id: 'company', label: 'Компания' },
-                    { id: 'region', label: 'Регион' },
-                  ] as const
-                ).map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setRole(tab.id)}
-                    className={`py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
-                      role === tab.id
-                        ? 'bg-white text-[#0B2A4A] shadow-sm'
-                        : 'text-[#1F2933]/60 hover:text-[#0B2A4A]'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-
               {/* Error Message */}
               {error && (
                 <div className="mb-4 p-3 bg-[#D64545]/10 border border-[#D64545]/20 text-[#D64545] rounded-lg text-sm flex items-center gap-2">
@@ -94,23 +67,13 @@ export default function RegisterPage() {
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-[#1F2933] mb-1">
-                    {role === 'resident'
-                      ? 'Ваше полное имя (ФИО)'
-                      : role === 'company'
-                      ? 'Название организации / Предприятия'
-                      : 'Название Администрации / Региона'}
+                    Ваше полное имя (ФИО)
                   </label>
                   <input
                     type="text"
                     name="name"
                     required
-                    placeholder={
-                      role === 'resident'
-                        ? 'Иван Иванов'
-                        : role === 'company'
-                        ? 'АО Сибирский Энергокомплекс'
-                        : 'Администрация Атомного региона'
-                    }
+                    placeholder="Иван Иванов"
                     className="w-full rounded-lg border border-[#0B2A4A]/15 bg-white px-4 py-3 text-sm text-[#1F2933] focus:border-[#00A3E0] focus:ring-2 focus:ring-[#00A3E0]/20 focus:outline-none transition-all"
                   />
                 </div>
@@ -136,14 +99,13 @@ export default function RegisterPage() {
                     type="password"
                     name="password"
                     required
-                    placeholder="••••••••"
+                    placeholder="Минимум 8 символов"
+                    minLength={8}
                     className="w-full rounded-lg border border-[#0B2A4A]/15 bg-white px-4 py-3 text-sm text-[#1F2933] focus:border-[#00A3E0] focus:ring-2 focus:ring-[#00A3E0]/20 focus:outline-none transition-all"
                   />
                 </div>
 
-                {/* Resident Specific Fields */}
-                {role === 'resident' && (
-                  <div className="space-y-4 pt-2 border-t border-[#0B2A4A]/5">
+                <div className="space-y-4 pt-2 border-t border-[#0B2A4A]/5">
                     <h3 className="text-sm font-semibold text-[#0B2A4A]">
                       Профессиональный профиль
                     </h3>
@@ -191,8 +153,7 @@ export default function RegisterPage() {
                         className="w-full rounded-lg border border-[#0B2A4A]/15 bg-white px-4 py-3 text-sm text-[#1F2933] focus:border-[#00A3E0] focus:ring-2 focus:ring-[#00A3E0]/20 focus:outline-none transition-all"
                       />
                     </div>
-                  </div>
-                )}
+                </div>
 
                 <Button
                   type="submit"

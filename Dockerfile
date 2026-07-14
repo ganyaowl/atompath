@@ -10,7 +10,8 @@ COPY package.json package-lock.json ./
 RUN npm ci
 # sqlite3's published binary currently requires a newer glibc than Bookworm.
 # Rebuilding here links it against the same glibc used by the builder and runner.
-RUN npm rebuild sqlite3 --build-from-source
+RUN npm_config_build_from_source=true \
+    npm rebuild sqlite3 --foreground-scripts --loglevel=info
 
 FROM node:24-bookworm-slim AS builder
 WORKDIR /app

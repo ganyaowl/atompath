@@ -77,7 +77,12 @@ docker compose logs --tail=100 caddy
 Caddy obtains and renews the TLS certificate automatically. Its certificate data
 survives container replacement in the `atompath-caddy-data` volume.
 
-To provision a company or regional account inside the running container:
+Residents, employers, and regional representatives can create demo accounts on
+the public `/register` page. Employer and regional registration is intentionally
+unverified in this MVP and must not be treated as production identity verification.
+
+An operator can still provision a company or regional account inside the running
+container when needed:
 
 ```bash
 docker exec -it atompath node scripts/provision-user.mjs \

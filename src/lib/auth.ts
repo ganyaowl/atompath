@@ -85,3 +85,9 @@ export async function requireRole(role: UserRole): Promise<SessionUser> {
   if (user.role !== role) throw new Error('Forbidden');
   return user;
 }
+
+export async function requireAnyRole(roles: readonly UserRole[]): Promise<SessionUser> {
+  const user = await requireUser();
+  if (!roles.includes(user.role)) throw new Error('Forbidden');
+  return user;
+}

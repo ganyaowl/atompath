@@ -2,10 +2,11 @@
 
 import { redirect } from 'next/navigation';
 import { refresh } from 'next/cache';
-import { createSession, destroySession, getSession, requireRole } from '@/lib/auth';
+import { createSession, destroySession, getSession, requireAnyRole, requireRole } from '@/lib/auth';
 import { getDb } from '@/lib/db';
 import { hashPassword, verifyPassword } from '@/lib/password';
 import { getSkills } from '@/lib/resident-data';
+import { getEmployerApplicants, getEmployerInternships, updateEmployerApplication } from '@/lib/employer-data';
 import type { ActionResult } from '@/lib/types';
 import {
   assessmentSchema,
@@ -26,40 +27,52 @@ export async function login(formData: FormData): Promise<ActionResult<never>> {
 
   const db = await getDb();
   const user = await db.get<{ id: number; password_hash: string | null }>(
-    'SELECT id, password_hash FROM users WHERE email = ? COLLATE NOCASE AND role = ?',
-    [parsed.data.email, parsed.data.role],
+    'SELECT id, password_hash FROM users WHERE email = ? COLLATE NOCASE',
+    parsed.data.email,
   );
   if (!user?.password_hash || !(await verifyPassword(parsed.data.password, user.password_hash))) {
-    return failure('Неверный email, пароль или роль');
+    return failure('Неверный email или пароль');
   }
 
   await createSession(user.id);
   redirect('/dashboard');
 }
 
-export async function registerResident(formData: FormData): Promise<ActionResult<never>> {
+export async function register(formData: FormData): Promise<ActionResult<never>> {
   const values = formDataObject(formData);
   const parsed = registrationSchema.safeParse({
     ...values,
     currentPosition: values.currentPosition ?? '',
     experience: values.experience ?? '',
     region: values.region ?? '',
+    skills: values.skills ?? '',
   });
   if (!parsed.success) return failure('Проверьте введенные данные', fieldErrors(parsed.error));
-  if (values.role && values.role !== 'resident') return failure('Публичная регистрация доступна только жителям');
+
+  const currentPosition = parsed.data.role === 'resident' ? parsed.data.currentPosition : '';
+  const experience = parsed.data.role === 'resident' ? parsed.data.experience : '';
+  const skills = parsed.data.role === 'resident' ? parsed.data.skills : '';
 
   const db = await getDb();
+  const existingUser = await db.get(
+    'SELECT 1 FROM users WHERE email = ? COLLATE NOCASE',
+    parsed.data.email,
+  );
+  if (existingUser) return failure('Пользователь с таким email уже существует');
+
   try {
     const result = await db.run(
       `INSERT INTO users (email, password_hash, role, name, current_position, experience, region, skills)
-       VALUES (?, ?, 'resident', ?, ?, ?, ?, '')`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         parsed.data.email.toLowerCase(),
         await hashPassword(parsed.data.password),
+        parsed.data.role,
         parsed.data.name,
-        parsed.data.currentPosition,
-        parsed.data.experience,
+        currentPosition,
+        experience,
         parsed.data.region,
+        skills,
       ],
     );
     await createSession(result.lastID!);
@@ -71,8 +84,6 @@ export async function registerResident(formData: FormData): Promise<ActionResult
   }
   redirect('/dashboard');
 }
-
-export const register = registerResident;
 
 export async function logout(): Promise<never> {
   await destroySession();
@@ -229,19 +240,6 @@ export async function applyInternship(internshipId: number): Promise<ActionResul
   return { success: true, data: undefined };
 }
 
-export async function addProfession(formData: FormData): Promise<ActionResult<undefined>> {
-  await requireRole('company');
-  const title = String(formData.get('title') ?? '').trim();
-  const requirements = String(formData.get('requirements') ?? '').trim();
-  if (!title || !requirements) return failure('Заполните название и требования');
-  const db = await getDb();
-  await db.run(
-    'INSERT INTO professions (title, requirements, salary_growth, transition_time) VALUES (?, ?, ?, ?)',
-    [title, requirements, String(formData.get('salaryGrowth') || '+25%'), String(formData.get('transitionTime') || '6 месяцев')],
-  );
-  return { success: true, data: undefined };
-}
-
 export async function addInternship(formData: FormData): Promise<ActionResult<undefined>> {
   const user = await requireRole('company');
   const title = String(formData.get('title') ?? '').trim();
@@ -255,23 +253,8 @@ export async function addInternship(formData: FormData): Promise<ActionResult<un
   return { success: true, data: undefined };
 }
 
-export async function updateDemand(formData: FormData): Promise<ActionResult<undefined>> {
-  await requireRole('company');
-  const year = String(formData.get('year') ?? '').trim();
-  if (!/^\d{4}$/.test(year)) return failure('Введите год в формате ГГГГ');
-  const values = ['automation', 'safety', 'digital', 'nuclear'].map((key) => Number(formData.get(key) ?? 0));
-  if (values.some((value) => !Number.isInteger(value) || value < 0)) return failure('Значения спроса должны быть неотрицательными числами');
-  const db = await getDb();
-  await db.run(
-    `INSERT INTO demands (year, automation, safety, digital, nuclear) VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(year) DO UPDATE SET automation=excluded.automation, safety=excluded.safety,
-     digital=excluded.digital, nuclear=excluded.nuclear`,
-    [year, ...values],
-  );
-  return { success: true, data: undefined };
-}
-
 export async function getProfessions() {
+  await requireAnyRole(['company', 'region']);
   return (await getDb()).all('SELECT * FROM professions ORDER BY title');
 }
 
@@ -283,41 +266,36 @@ export async function getCoursesList() {
 }
 
 export async function getInternshipsList() {
-  const user = await getSession();
+  const user = await requireAnyRole(['company', 'region']);
   const db = await getDb();
-  return db.all(`SELECT i.*, CASE WHEN a.id IS NULL THEN 0 ELSE 1 END applied,
-    IFNULL(a.status, '') appStatus FROM internships i
-    LEFT JOIN applications a ON a.internship_id = i.id AND a.user_id = ?`, user?.id ?? -1);
+  if (user.role === 'company') {
+    return getEmployerInternships(user.id);
+  }
+  return db.all('SELECT * FROM internships ORDER BY id DESC');
 }
 
 export async function getDemands() {
+  await requireAnyRole(['company', 'region']);
   return (await getDb()).all('SELECT * FROM demands ORDER BY year');
 }
 
 export async function getRegionStats() {
+  await requireRole('region');
   return (await getDb()).all('SELECT * FROM region_stats ORDER BY district');
 }
 
 export async function getCompanyApplicants() {
   const user = await requireRole('company');
-  return (await getDb()).all(`
-    SELECT a.id applicationId, a.status applicationStatus, u.name residentName,
-           u.email residentEmail, u.current_position residentPos, u.experience residentExp,
-           u.skills residentSkills, i.title internshipTitle
-    FROM applications a JOIN users u ON u.id = a.user_id
-    JOIN internships i ON i.id = a.internship_id
-    WHERE i.company_id = ? ORDER BY a.created_at DESC
-  `, user.id);
+  return getEmployerApplicants(user.id);
 }
 
 export async function handleApplicationAction(appId: number, action: 'Одобрить' | 'Отклонить'): Promise<ActionResult<undefined>> {
   const user = await requireRole('company');
+  if (!Number.isInteger(appId) || appId <= 0 || (action !== 'Одобрить' && action !== 'Отклонить')) {
+    return failure('Некорректное действие');
+  }
   const status = action === 'Одобрить' ? 'Одобрено' : 'Отклонено';
-  const result = await (await getDb()).run(
-    `UPDATE applications SET status = ? WHERE id = ? AND internship_id IN
-     (SELECT id FROM internships WHERE company_id = ?)`,
-    [status, appId, user.id],
-  );
+  const result = await updateEmployerApplication(user.id, appId, status);
   if (!result.changes) return failure('Заявка не найдена или недоступна');
   return { success: true, data: undefined };
 }

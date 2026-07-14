@@ -8,13 +8,16 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 RUN npm ci
+# sqlite3's published binary currently requires a newer glibc than Bookworm.
+# Rebuilding here links it against the same glibc used by the builder and runner.
+RUN npm rebuild sqlite3 --build-from-source
 
 FROM node:24-bookworm-slim AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+RUN --mount=type=cache,target=/app/.next/cache npm run build
 
 FROM node:24-bookworm-slim AS runner
 WORKDIR /app

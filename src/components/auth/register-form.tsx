@@ -13,7 +13,7 @@ import type { UserRole } from '@/lib/types';
 type FieldErrors = Record<string, string[]>;
 
 const roles = [
-  { id: 'resident', label: 'Житель', icon: UserRound },
+  { id: 'resident', label: 'Соискатель', icon: UserRound },
   { id: 'company', label: 'Работодатель', icon: Building2 },
   { id: 'region', label: 'Регион', icon: Landmark },
 ] as const;

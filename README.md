@@ -123,6 +123,36 @@ docker compose exec caddy caddy validate --config /etc/caddy/Caddyfile
 docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
 ```
 
+### GitHub Actions deployment
+
+The workflow in [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
+runs tests and lint on pull requests. A push to `main` builds the application image
+on a GitHub-hosted runner, pushes it to GHCR, and deploys it over SSH. The production
+server only pulls the finished image, so it does not need enough RAM to run
+`next build`.
+
+Add these repository secrets under **Settings → Secrets and variables → Actions**:
+
+- `ORACLE_HOST`: the server IP or SSH hostname.
+- `ORACLE_USER`: `ubuntu`.
+- `ORACLE_SSH_KEY`: the complete private key from
+  `~/.ssh/github_actions_oracle`, including its BEGIN/END lines. Never commit this
+  value to the repository.
+
+The matching public key must be present in the server's `authorized_keys`:
+
+```bash
+grep -qFf ~/.ssh/github_actions_oracle.pub ~/.ssh/authorized_keys \
+  || cat ~/.ssh/github_actions_oracle.pub >> ~/.ssh/authorized_keys
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/authorized_keys
+```
+
+No GHCR secret is required. The workflow uses its short-lived `GITHUB_TOKEN` to
+push the image and to authenticate the server for the corresponding pull. The
+Compose image is `ghcr.io/ganyaowl/atompath:latest`; the workflow also publishes
+an immutable tag matching the Git commit SHA.
+
 ### Slow build troubleshooting
 
 The warning about `prebuild-install@7.1.3` comes from `sqlite3`; it does not stop

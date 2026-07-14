@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: atompath:latest
+    image: ghcr.io/ganyaowl/atompath:latest
     container_name: atompath
     restart: unless-stopped
     init: true

@@ -1,0 +1,12 @@
+# Install this as a site imported by the Caddy instance already using ports 80/443.
+# DNS for ganyaowl.uz must point to this server.
+ganyaowl.uz {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:3001
+
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}

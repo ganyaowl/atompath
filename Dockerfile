@@ -1,26 +1,20 @@
 # syntax=docker/dockerfile:1
 
-FROM node:24-bookworm-slim AS dependencies
+FROM node:24-trixie-slim AS dependencies
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends python3 make g++ \
-    && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
-RUN npm ci
-# sqlite3's published binary currently requires a newer glibc than Bookworm.
-# Rebuilding here links it against the same glibc used by the builder and runner.
-RUN npm_config_build_from_source=true \
-    npm rebuild sqlite3 --foreground-scripts --loglevel=info
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --prefer-offline --no-audit --no-fund
 
-FROM node:24-bookworm-slim AS builder
+FROM node:24-trixie-slim AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
 RUN --mount=type=cache,target=/app/.next/cache npm run build
 
-FROM node:24-bookworm-slim AS runner
+FROM node:24-trixie-slim AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \
